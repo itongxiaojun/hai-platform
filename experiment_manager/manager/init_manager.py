@@ -165,6 +165,7 @@ def create_http_service_ingress(node, base_ingress_name):
 # Fix: https://github.com/HFAiLab/hai-platform/issues/24
 def create_http_service_ingress_v1(node, base_ingress_name):
     if 'ingress_rules' not in node.service or len(node.service.ingress_rules) == 0:
+        logger.info(f'为 {node.pod_id} if \'ingress_rules\' not in node.service or len(node.service.ingress_rules) == 0 , return')
         return
     host = CONF.jupyter.ingress_host[base_ingress_name]
     ingress_name = f'{node.pod_id}-{base_ingress_name}'
@@ -248,6 +249,7 @@ def create_master_network(rank, node, is_internal):
         #    create_http_service_ingress(node, 'hfhub')
         #    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
         # else:
+        logger.info(f'为 {node.pod_id} 开始创建 create_http_service_ingress_v1(node, \'hfhub\') 服务')
         create_http_service_ingress_v1(node, 'hfhub')
         logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务成功')
         #if not is_internal:
