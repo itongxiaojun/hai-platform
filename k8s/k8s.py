@@ -962,11 +962,9 @@ def get_k8s_version():
     return parse_version(vinfo.git_version)
 
 
-def get_networkv1_api(cluster_host = CURRENT_CLUSTER_HOST):
-    load_all_api_client_cached()
-    if cluster_host == 'all':
-        return {host: NetworkingV1ApiWithRetry(api_client=client) for host, client in KUBECLIENTS.items()}
-    return NetworkingV1ApiWithRetry(api_client=KUBECLIENTS[cluster_host])
+def get_networkv1_api():
+    load_k8s_config()
+    return NetworkingV1ApiWithRetry()
 
 
 class NetworkingV1ApiWithRetry(client.NetworkingV1Api):
