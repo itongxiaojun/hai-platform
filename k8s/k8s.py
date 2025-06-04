@@ -957,10 +957,14 @@ def parse_version(ver_str):
     return tuple(map(int, parts.split('.')))
 
 def get_k8s_version():
-    load_k8s_config()
-    version_api = VersionApi(api_client=client)
-    vinfo = version_api.get_code()
-    return parse_version(vinfo.git_version)
+    try:
+        load_k8s_config()
+        version_api = VersionApi()
+        vinfo = version_api.get_code()  # 直接调用，无需传递 api_client
+        return parse_version(vinfo.git_version)
+    except Exception as e:
+        print(f"Failed to get Kubernetes version: {e}")
+        return None
 
 
 def get_networkv1_api():
