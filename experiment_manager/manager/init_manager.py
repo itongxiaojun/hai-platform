@@ -163,7 +163,7 @@ def create_http_service_ingress(node, base_ingress_name):
 
 # Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
 # Fix: https://github.com/HFAiLab/hai-platform/issues/24
-def create_http_service_ingress(node, base_ingress_name):
+def create_http_service_ingress_v1(node, base_ingress_name):
     if 'ingress_rules' not in node.service or len(node.service.ingress_rules) == 0:
         return
     host = CONF.jupyter.ingress_host[base_ingress_name]
