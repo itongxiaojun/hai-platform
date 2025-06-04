@@ -225,8 +225,10 @@ def create_http_service_ingress_v1(node, base_ingress_name):
             logger.f_error(f'创建 ingress 失败: {ae}')
             raise
 
+# Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
+# Fix: https://github.com/HFAiLab/hai-platform/issues/24
     # 等待ingress配置完成
-    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务结束 等待ingress配置完成 ...')
+    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'{base_ingress_name}\') 服务结束 等待ingress配置完成 ...')
     #watch = Watch()
     #for event in watch.stream(
     #    func=k8s_networkv1_api.list_namespaced_ingress,
@@ -246,20 +248,20 @@ def create_master_network(rank, node, is_internal):
     create_tcp_service_nodeport(rank, node)
     if rank == 0:  # 只有 master 才会创建
         create_headless_services(node)
-        #if k8s_ver < (1, 21):
-        #    create_http_service_ingress(node, 'hfhub')
-        #    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
-        # else:
-        logger.info(f'为 {node.pod_id} 开始创建 create_http_service_ingress_v1(node, \'hfhub\') 服务')
-        create_http_service_ingress_v1(node, 'hfhub')
-        logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务成功')
-        #if not is_internal:
-        #    if k8s_ver < (1, 21):
-        #       create_http_service_ingress(node, 'yinghuo')
-        #        logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'yinghuo\') 服务成功')
-        #    else:
-        #        create_http_service_ingress_v1(node, 'yinghuo')
-        #        logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'yinghuo\') 服务成功')
+        if k8s_ver < (1, 21):
+            create_http_service_ingress(node, 'hfhub')
+            logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
+        else:
+            logger.info(f'为 {node.pod_id} 开始创建 create_http_service_ingress_v1(node, \'hfhub\') 服务')
+            create_http_service_ingress_v1(node, 'hfhub')
+            logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务成功')
+        if not is_internal:
+            if k8s_ver < (1, 21):
+               create_http_service_ingress(node, 'yinghuo')
+                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'yinghuo\') 服务成功')
+            else:
+                create_http_service_ingress_v1(node, 'yinghuo')
+                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'yinghuo\') 服务成功')
 
 
 @log_stage(log_id)
