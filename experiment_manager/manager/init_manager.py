@@ -226,6 +226,7 @@ def create_http_service_ingress_v1(node, base_ingress_name):
             raise
 
     # 等待ingress配置完成
+    logger.info(f'为 {node.pod_id} 开始创建 create_http_service_ingress_v1(node, \'hfhub\') 服务 等待ingress配置完成 ...')
     watch = Watch()
     for event in watch.stream(
         func=k8s_networkv1_api.list_namespaced_ingress,
