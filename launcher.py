@@ -177,6 +177,7 @@ def create_manager(task: TrainingTask, user_name):
                   for container in ['init_manager', 'manager']]
     init_command = ['/bin/bash', '-c']
     init_args = ' && '.join([
+        "pip install --upgrade kubernetes",
         "cd /high-flyer/code/multi_gpu_runner_server",
         "PYTHONPATH=/high-flyer/code/multi_gpu_runner_server python -u experiment_manager/manager/init_manager.py"])
     init_command.append(init_args)
