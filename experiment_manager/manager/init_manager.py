@@ -28,6 +28,8 @@ from roman_parliament.utils import generate_key
 
 from experiment_manager.manager.manager_utils import get_log_uuid
 
+
+
 task_id = int(os.environ['TASK_ID'])
 module = os.path.basename(__file__)
 initialize_user_data_roaming(overwrite_enable_roaming=False)
@@ -43,6 +45,15 @@ user: User = task.user
 
 k8s_corev1_api = get_corev1_api()
 k8s_networkv1beta1_api = get_networkv1beta1_api()
+
+# Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
+# Fix: https://github.com/HFAiLab/hai-platform/issues/24
+
+from k8s import get_networkv1_api, get_k8s_version
+k8s_networkv1_api = get_networkv1_api()
+k8s_ver = get_k8s_version()
+
+
 # 训练相关的所有资源 ref 到这个任务的 manager
 k8s_appsv1_api = get_appsv1_api()
 manager_name = os.environ['MANAGER_NAME']
@@ -55,6 +66,7 @@ owner_ref = client.V1OwnerReference(api_version='apps/v1', kind='StatefulSet', n
 if any([pod.status != EXP_STATUS.CREATED for pod in task.pods]):
     logger.warning(f'检测到所有pod状态都不为created，不启动任务', uuid=f'{log_id}.enter_exit')  # pod已创建
     exit(0)
+
 
 
 def check_mount(mount_path, mount_code):
@@ -149,15 +161,76 @@ def create_http_service_ingress(node, base_ingress_name):
                          f'{event["object"].status.load_balancer.ingress}')
             watch.stop()
 
+# Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
+# Fix: https://github.com/HFAiLab/hai-platform/issues/24
+def create_http_service_ingress_v1(node, base_ingress_name):
+    if 'ingress_rules' not in node.service or len(node.service.ingress_rules) == 0:
+        return
+    host = CONF.jupyter.ingress_host[base_ingress_name]
+    ingress_name = f'{node.pod_id}-{base_ingress_name}'
+    metadata = client.V1ObjectMeta(
+        name=ingress_name, labels=node.labels, namespace=node.namespace,
+        annotations={
+            "nginx.ingress.kubernetes.io/proxy-buffering": "off",
+            "nginx.ingress.kubernetes.io/proxy-read-timeout": "604800",
+            "nginx.ingress.kubernetes.io/proxy-send-timeout": "604800"
+        },
+        owner_references=[owner_ref],
+    )
+    ingress_rules = [
+        client.NetworkingV1IngressRule(
+            host=host, http=client.NetworkingV1HTTPIngressRuleValue(
+                paths=[client.NetworkingV1HTTPIngressPath(
+                    backend=client.NetworkingV1IngressBackend(
+                        service_name=node.pod_id,
+                        service_port=rule.port,
+                    ),
+                    path=rule.path,
+                    path_type='Prefix'
+                )]
+            )
+        )
+        for rule in node.service.ingress_rules
+    ]
+    spec = client.NetworkingV1IngressSpec(ingress_class_name='nginx', rules=ingress_rules)
+    ingress = client.NetworkingV1Ingress(kind='Ingress', metadata=metadata, spec=spec)
+    try:
+        k8s_networkv1_api.create_namespaced_ingress_with_retry(namespace=node.namespace, body=ingress)
+    except ApiException as ae:
+        if ae.status == 409:  # conflict
+            logger.info(f'ingress {ingress_name} already exits')
+        else:
+            logger.exception(ae)
+            logger.f_error(f'创建 ingress 失败: {ae}')
+            raise
 
+    # wait for ingress provision
+    watch = Watch()
+    for event in watch.stream(func=k8s_networkv1beta1_api.list_namespaced_ingress,
+                              namespace=node.namespace,
+                              field_selector=f'metadata.name={ingress_name}'):
+        if event["object"].status.load_balancer.ingress is not None:
+            logger.info(f'为 {node.pod_id} 创建 ingress 成功，信息：'
+                         f'{event["object"].status.load_balancer.ingress}')
+            watch.stop()
+
+
+# Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
+# Fix: https://github.com/HFAiLab/hai-platform/issues/24
 @log_stage(log_id)
 def create_master_network(rank, node, is_internal):
     create_tcp_service_nodeport(rank, node)
     if rank == 0:  # 只有 master 才会创建
         create_headless_services(node)
-        create_http_service_ingress(node, 'hfhub')
+        if k8s_ver < (1, 21):
+            create_http_service_ingress(node, 'hfhub')
+        else:
+            create_http_service_ingress_v1(node, 'hfhub')
         if not is_internal:
-            create_http_service_ingress(node, 'yinghuo')
+            if k8s_ver < (1, 21):
+                create_http_service_ingress(node, 'yinghuo')
+            else:
+                create_http_service_ingress_v1(node, 'yinghuo')
 
 
 @log_stage(log_id)
