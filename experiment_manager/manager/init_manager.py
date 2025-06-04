@@ -163,7 +163,7 @@ def create_http_service_ingress(node, base_ingress_name):
 
 # Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
 # Fix: https://github.com/HFAiLab/hai-platform/issues/24
-def create_http_service_ingress_v1(node, base_ingress_name):
+def create_http_service_ingress(node, base_ingress_name):
     if 'ingress_rules' not in node.service or len(node.service.ingress_rules) == 0:
         return
     host = CONF.jupyter.ingress_host[base_ingress_name]
@@ -177,13 +177,20 @@ def create_http_service_ingress_v1(node, base_ingress_name):
         },
         owner_references=[owner_ref],
     )
+    
+    # 使用v1 API替换v1beta1
     ingress_rules = [
-        client.NetworkingV1IngressRule(
-            host=host, http=client.NetworkingV1HTTPIngressRuleValue(
-                paths=[client.NetworkingV1HTTPIngressPath(
-                    backend=client.NetworkingV1IngressBackend(
-                        service_name=node.pod_id,
-                        service_port=rule.port,
+        client.V1IngressRule(
+            host=host, 
+            http=client.V1HTTPIngressRuleValue(
+                paths=[client.V1HTTPIngressPath(
+                    backend=client.V1IngressBackend(
+                        service=client.V1IngressServiceBackend(
+                            name=node.pod_id,
+                            port=client.V1ServiceBackendPort(
+                                number=rule.port
+                            )
+                        )
                     ),
                     path=rule.path,
                     path_type='Prefix'
@@ -192,26 +199,41 @@ def create_http_service_ingress_v1(node, base_ingress_name):
         )
         for rule in node.service.ingress_rules
     ]
-    spec = client.NetworkingV1IngressSpec(ingress_class_name='nginx', rules=ingress_rules)
-    ingress = client.NetworkingV1Ingress(kind='Ingress', metadata=metadata, spec=spec)
+    
+    spec = client.V1IngressSpec(
+        ingress_class_name='nginx', 
+        rules=ingress_rules
+    )
+    ingress = client.V1Ingress(
+        kind='Ingress', 
+        metadata=metadata, 
+        spec=spec
+    )
+    
     try:
-        k8s_networkv1_api.create_namespaced_ingress_with_retry(namespace=node.namespace, body=ingress)
+        # 使用v1 API客户端
+        k8s_networkv1_api.create_namespaced_ingress(
+            namespace=node.namespace, 
+            body=ingress
+        )
     except ApiException as ae:
         if ae.status == 409:  # conflict
-            logger.info(f'ingress {ingress_name} already exits')
+            logger.info(f'ingress {ingress_name} already exists')
         else:
             logger.exception(ae)
             logger.f_error(f'创建 ingress 失败: {ae}')
             raise
 
-    # wait for ingress provision
+    # 等待ingress配置完成
     watch = Watch()
-    for event in watch.stream(func=k8s_networkv1beta1_api.list_namespaced_ingress,
-                              namespace=node.namespace,
-                              field_selector=f'metadata.name={ingress_name}'):
+    for event in watch.stream(
+        func=k8s_networkv1_api.list_namespaced_ingress,
+        namespace=node.namespace,
+        field_selector=f'metadata.name={ingress_name}'
+    ):
         if event["object"].status.load_balancer.ingress is not None:
             logger.info(f'为 {node.pod_id} 创建 ingress 成功，信息：'
-                         f'{event["object"].status.load_balancer.ingress}')
+                       f'{event["object"].status.load_balancer.ingress}')
             watch.stop()
 
 
