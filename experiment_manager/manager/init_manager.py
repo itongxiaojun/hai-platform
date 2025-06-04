@@ -244,19 +244,19 @@ def create_master_network(rank, node, is_internal):
     create_tcp_service_nodeport(rank, node)
     if rank == 0:  # 只有 master 才会创建
         create_headless_services(node)
-        if k8s_ver < (1, 21):
-            create_http_service_ingress(node, 'hfhub')
-            logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
-        else:
+        #if k8s_ver < (1, 21):
+        #    create_http_service_ingress(node, 'hfhub')
+        #    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
+       # else:
             create_http_service_ingress_v1(node, 'hfhub')
             logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务成功')
-        if not is_internal:
-            if k8s_ver < (1, 21):
-                create_http_service_ingress(node, 'yinghuo')
-                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'yinghuo\') 服务成功')
-            else:
-                create_http_service_ingress_v1(node, 'yinghuo')
-                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'yinghuo\') 服务成功')
+        #if not is_internal:
+        #    if k8s_ver < (1, 21):
+        #       create_http_service_ingress(node, 'yinghuo')
+        #        logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'yinghuo\') 服务成功')
+        #    else:
+        #        create_http_service_ingress_v1(node, 'yinghuo')
+        #        logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'yinghuo\') 服务成功')
 
 
 @log_stage(log_id)
