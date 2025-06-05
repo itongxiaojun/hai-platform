@@ -240,6 +240,78 @@ def create_http_service_ingress_v1(node, base_ingress_name):
     #                   f'{event["object"].status.load_balancer.ingress}')
     #        watch.stop()
 
+def create_http_service_ingress_cilium_v1(node, base_ingress_name):
+    if 'ingress_rules' not in node.service or len(node.service.ingress_rules) == 0:
+        logger.info(f'为 {node.pod_id} if \'ingress_rules\' not in node.service or len(node.service.ingress_rules) == 0 , return')
+        return
+    host = CONF.jupyter.ingress_host[base_ingress_name]
+    ingress_name = f'{node.pod_id}-{base_ingress_name}'
+    metadata = client.V1ObjectMeta(
+        name=ingress_name, labels=node.labels, namespace=node.namespace,
+        annotations={
+            # 替换为Cilium支持的注解
+            "ingress.cilium.io/loadbalancer-mode": "dedicated",  # 或 "shared" 根据需求选择
+            "ingress.cilium.io/service-type": "LoadBalancer",  # 或 "NodePort"
+            # 保留超时设置（如果Cilium支持）
+            "ingress.cilium.io/proxy-read-timeout": "604800",
+            "ingress.cilium.io/proxy-send-timeout": "604800"
+        },
+        owner_references=[owner_ref],
+    )
+    
+    # 使用v1 API替换v1beta1
+    ingress_rules = [
+        client.V1IngressRule(
+            host=host, 
+            http=client.V1HTTPIngressRuleValue(
+                paths=[client.V1HTTPIngressPath(
+                    backend=client.V1IngressBackend(
+                        service=client.V1IngressServiceBackend(
+                            name=node.pod_id,
+                            port=client.V1ServiceBackendPort(
+                                number=rule.port
+                            )
+                        )
+                    ),
+                    path=rule.path,
+                    path_type='Prefix'
+                )]
+            )
+        )
+        for rule in node.service.ingress_rules
+    ]
+    
+    spec = client.V1IngressSpec(
+        ingress_class_name='cilium',  # 修改为cilium
+        rules=ingress_rules
+    )
+    ingress = client.V1Ingress(
+        kind='Ingress', 
+        metadata=metadata, 
+        spec=spec
+    )
+    
+    try:
+        # 使用v1 API客户端
+        k8s_networkv1_api.create_namespaced_ingress(
+            namespace=node.namespace, 
+            body=ingress
+        )
+    except ApiException as ae:
+        if ae.status == 409:  # conflict
+            logger.info(f'ingress {ingress_name} already exists')
+        else:
+            logger.exception(ae)
+            logger.f_error(f'创建 ingress 失败: {ae}')
+            raise
+
+    # 等待ingress配置完成
+    logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_cilium_v1(node, \'{base_ingress_name}\') 等待ingress配置完成 ...')
+    watch = Watch()
+    for event in watch.stream(func=k8s_networkv1_api.list_namespaced_ingress,namespace=node.namespace,field_selector=f'metadata.name={ingress_name}'):
+        if event["object"].status.load_balancer.ingress is not None:
+            logger.info(f'为 {node.pod_id} 创建 ingress 成功，信息：'f'{event["object"].status.load_balancer.ingress}')
+            watch.stop()
 
 # Feature: Ingress API Compatibility Based on Kubernetes Version (Fix Jupyter Container Exit Issue)
 # Fix: https://github.com/HFAiLab/hai-platform/issues/24
@@ -253,14 +325,14 @@ def create_master_network(rank, node, is_internal):
             logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'hfhub\') 服务成功')
         else:
             logger.info(f'为 {node.pod_id} 开始创建 create_http_service_ingress_v1(node, \'hfhub\') 服务')
-            create_http_service_ingress_v1(node, 'hfhub')
+            create_http_service_ingress_cilium_v1(node, 'hfhub')
             logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'hfhub\') 服务成功')
         if not is_internal:
             if k8s_ver < (1, 21):
                create_http_service_ingress(node, 'yinghuo')
                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress(node, \'yinghuo\') 服务成功')
             else:
-               create_http_service_ingress_v1(node, 'yinghuo')
+               create_http_service_ingress_cilium_v1(node, 'yinghuo')
                logger.info(f'为 {node.pod_id} 创建 create_http_service_ingress_v1(node, \'yinghuo\') 服务成功')
 
 
