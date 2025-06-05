@@ -34,6 +34,8 @@ set_env() {
 
   # all in one image
   : ${BASE_IMAGE:="registry.cn-hangzhou.aliyuncs.com/hfai/hai-platform:latest"}
+  # train image
+  : ${TRAIN_IMAGE:="registry.cn-hangzhou.aliyuncs.com/hfai/hai-platform:latest"}
   # ingress hostname serving studio, jupyter
   : ${INGRESS_HOST:="nginx-ingress-lb.kube-system.c2c348f48c063452fa5738ec9caeb69ea.cn-hangzhou.alicontainer.com"}
   INGRESS_HOST=`echo ${INGRESS_HOST} | sed -e 's/^http:\/\///' -e 's/^https:\/\///'`
@@ -125,6 +127,7 @@ print_config_script() {
     export BFF_ADMIN_UID=10000 # uid of the reserved admin user for bff
     export BFF_ADMIN_TOKEN=$(echo $RANDOM | md5sum | head -c 20)    # token of the reserved admin user for bff
     export BASE_IMAGE="registry.cn-hangzhou.aliyuncs.com/hfai/hai-platform:latest" # all in one image
+    export TRAIN_IMAGE="registry.cn-hangzhou.aliyuncs.com/hfai/hai-platform:latest" # train image
     export NODE_GPUS=4 # gpus per node
     export HAS_RDMA_HCA_RESOURCE=0 # ib per node
     export KUBECONFIG="$HOME/.kube/config" # kubeconfig file path
@@ -292,7 +295,6 @@ VALUES
       ('marsv2-scripts-{task.id}:validate_image.sh', '/marsv2/scripts/validate_image.sh', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
       ('marsv2-scripts-{task.id}:waiting_for_master.sh', '/marsv2/scripts/waiting_for_master.sh', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
       ('marsv2-scripts-{task.id}:waiting_pods_done.py', '/marsv2/scripts/waiting_pods_done.py', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
-      ('marsv2-scripts-{task.id}:start_jupyter_with_ext.sh', '/marsv2/scripts/start_jupyter_with_ext.sh', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
       ('marsv2-scripts-{task.id}:hf_login_handler.py', '/marsv2/scripts/hf_login_handler.py', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
       ('marsv2-scripts-{task.id}:hf_kernel_spec_manager.py', '/marsv2/scripts/hf_kernel_spec_manager.py', '{public}', '{}'::varchar[], 'configmap', true, 'add', true),
       ('marsv2-entrypoints-{task.id}', '/marsv2/entrypoints', '{public}', '{}'::varchar[], 'configmap', true, 'add', true)
@@ -301,7 +303,11 @@ ON CONFLICT DO NOTHING;
 INSERT INTO "storage" ("host_path", "mount_path", "owners", "conditions", "mount_type", "read_only", "action", "active")
 VALUES
       -- 用户工作目录
-      ('${HAI_PLATFORM_PATH}/workspace/{user.user_name}', '${HAI_PLATFORM_PATH}/workspace/{user.user_name}', '{public}', '{}'::varchar[], 'Directory', false, 'add', true)
+      ('${HAI_PLATFORM_PATH}/workspace/{user.user_name}', '${HAI_PLATFORM_PATH}/workspace/{user.user_name}', '{public}', '{}'::varchar[], 'Directory', false, 'add', true),
+      ('${HAI_PLATFORM_PATH}/hai-platform','/high-flyer/code/multi_gpu_runner_server','{public}','{}'::varchar[],'Directory',true,'add',true),
+      ('${HAI_PLATFORM_PATH}/hai-platform-jupyter-ext/jupyterlab_hai_platform_ext/labextension','/jupyter_ext/client/jupyterlab_hai_platform_ext','{public}','{}'::varchar[],'Directory',true,'add',true),
+      ('${HAI_PLATFORM_PATH}/hai-platform-jupyter-ext/jupyter-config/jupyterlab_hai_platform_ext.json','/usr/local/etc/jupyter/jupyter_server_config.d/jupyterlab_hai_platform_ext.json','{public}','{}'::varchar[],'File',true,'add',true),
+      ('${HAI_PLATFORM_PATH}/hai-platform-jupyter-ext/jupyter-config/start_jupyter_with_ext.sh','/marsv2/scripts/start_jupyter_with_ext.sh','{public}','{}'::varchar[],'File',true,'add',true)
 ON CONFLICT DO NOTHING;
 
 -- 和上面创建的分组对应起来 training
@@ -312,6 +318,8 @@ VALUES
       ('public', 'node-${TRAINING_GROUP}-HIGH', 10),
       -- 设置可用的训练节点数量
       ('public', 'node', 1),
+      -- 设置可用的 nodeport 数量
+      ('public', 'port', 1),
       -- 系统内建镜像，和下面的 train_environment 对应起来
       ('public', 'train_environment:hai_base', 1),
       -- 任务容器的capabilities
@@ -334,8 +342,8 @@ ON CONFLICT DO NOTHING;
 
 INSERT INTO "train_environment" ("env_name", "image", "schema_template", "config")
 VALUES
-      -- 系统自定义的镜像，可以基于 multi_gpu_runner_server 来做，或者参考 validate_image.sh 中镜像的条件
-      ('hai_base', '${BASE_IMAGE}', '', '{"environments": {}, "python": "/usr/bin/python3.8"}')
+      -- 训练镜像，如自定义，需要满足 validate_image.sh 中镜像的条件
+      ('hai_base', '${TRAIN_IMAGE}', '', '{"environments": {"BFF_URL": "http://${INGRESS_HOST}", "WS_URL": "ws://${INGRESS_HOST}", "CLUSTER_SERVER_URL": "http://${HAI_SERVER_ADDR}"}, "python": "/usr/bin/python3.8"}')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO "host" ("node", "gpu_num", "type", "use", "origin_group", "room")
@@ -500,6 +508,8 @@ spec:
         imagePullPolicy: Always
         name: hai-platform
         env:
+        - name: server_path
+          value: ${HAI_PLATFORM_PATH}/hai-platform
         - name: KUBECONFIG
           value: /root/.kube/config
         - name: PG_DATA_DIR
@@ -594,6 +604,8 @@ spec:
           name: initsql
         - mountPath: /etc/hai_one_config/override.toml
           name: overridetoml
+        - mountPath: /high-flyer/code/multi_gpu_runner_server
+          name: haiplatform
 `echo -e "${EXTRA_K8S_VOLUMEMOUNTS}"`
       nodeSelector:
         kubernetes.io/os: linux
@@ -637,6 +649,10 @@ spec:
           path: ${HAI_PLATFORM_PATH}/override.toml
           type: File
         name: overridetoml
+      - hostPath:
+          path: ${HAI_PLATFORM_PATH}/hai-platform
+          type: Directory
+        name: haiplatform
 `echo -e "${EXTRA_K8S_HOSTPATH}"`
 EOF
     cat << EOF > ${HAI_PLATFORM_PATH}/k8s_configs/hai-platform-service.yaml.in
