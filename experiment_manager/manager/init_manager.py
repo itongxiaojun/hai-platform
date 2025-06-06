@@ -250,7 +250,7 @@ def create_http_service_ingress_cilium_v1(node, base_ingress_name):
         name=ingress_name, labels=node.labels, namespace=node.namespace,
         annotations={
             # 替换为Cilium支持的注解
-            "ingress.cilium.io/loadbalancer-mode": "dedicated",  # 或 "shared" 根据需求选择
+            "ingress.cilium.io/loadbalancer-mode": "shared",  # “dedicated” 或 "shared" 根据需求选择
             "ingress.cilium.io/service-type": "LoadBalancer",  # 或 "NodePort"
             # 保留超时设置（如果Cilium支持）
             "ingress.cilium.io/proxy-read-timeout": "604800",
